@@ -1,22 +1,27 @@
 package main
 
 import (
-	"github.com/go-fsnotify/fsnotify"
-	// "io"
 	"io/ioutil"
-	"log"
 	"os"
 	pathUtil "path"
+
+	"github.com/go-fsnotify/fsnotify"
 )
 
+// Watcher watches for file system changes, and sends an update message on the
+// Updates channel
 type Watcher struct {
 	fsWatcher *fsnotify.Watcher
 
 	Updates    chan string
 	cancelChan chan bool
+
+	filterFunc func(string) bool
 }
 
-func NewWatcher(path string, cancel chan bool) (watcher *Watcher, err error) {
+// NewWatcher creates a new (recursive, constant) Watcher with root in path.
+// It will stop executing when it receives a message on the cancel channel.
+func NewWatcher(path string, cancel chan bool, filterFunc func(string) bool) (watcher *Watcher, err error) {
 	watcher = &Watcher{}
 	watcher.fsWatcher, err = fsnotify.NewWatcher()
 	if err != nil {
@@ -25,22 +30,24 @@ func NewWatcher(path string, cancel chan bool) (watcher *Watcher, err error) {
 
 	watcher.Updates = make(chan string)
 	watcher.cancelChan = cancel
+	watcher.filterFunc = filterFunc
 	watcher.watchDirectory(path)
 
 	return watcher, nil
 }
 
+// Run starts executing the watcher
 func (watcher *Watcher) Run() {
 	for {
 		select {
 		case event := <-watcher.fsWatcher.Events:
-			log.Println(event)
+			log.Debug(event)
 			watcher.Updates <- event.Name
 		case err := <-watcher.fsWatcher.Errors:
-			log.Println(err)
+			log.Error(err)
 		case <-watcher.cancelChan:
 			if err := watcher.fsWatcher.Close(); err != nil {
-				log.Println(err)
+				log.Error(err)
 			}
 			close(watcher.Updates)
 			return
@@ -67,26 +74,45 @@ func (watcher *Watcher) watchDirectory(path string) {
 	if os.IsNotExist(err) {
 		return
 	} else if err != nil {
-		// log.Printf("ReadDir failed for %s: %s", pathStr, err)
+		log.Errorf("ReadDir failed for %s: %s", path, err)
+		return
+	}
+
+	if !watcher.filterFunc(path) {
+		log.Debugf("Path '%s' was filtered", path)
 		return
 	}
 
 	if err = watcher.fsWatcher.Add(path); err != nil {
-		log.Fatalf("Failed to watch %s: %s", err)
+		log.Errorf("Failed to watch %s: %s", path, err)
 	} else {
-		log.Printf("Watching %s", path)
+		log.Debug("Watching", path)
 
 		for _, entry := range entries {
 			subDir := pathUtil.Join(path, entry.Name())
 			if isDir, err := isDirectory(subDir); isDir {
 				watcher.watchDirectory(subDir)
 			} else if err != nil {
-				log.Fatalf("%s", err)
+				log.Errorf("%s", err)
 			}
 		}
 	}
 }
 
-func watchFile(path string) {
+func (watcher *Watcher) watchFile(path string) {
+	stat, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return
+	}
 
+	if stat.IsDir() {
+		log.Critical("watchFile called on a directory")
+		return
+	}
+
+	if err = watcher.fsWatcher.Add(path); err != nil {
+		log.Errorf("Failed to watch %s: %s", path, err)
+	} else {
+		log.Infof("Watching %s", path)
+	}
 }
