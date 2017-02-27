@@ -50,7 +50,7 @@ func main() {
 		return
 	}
 
-	r := NewCommandRunner(os.Args[1:])
+	r := NewShCommandRunner(os.Args[1:])
 
 	wg.Add(1)
 	go func() {
