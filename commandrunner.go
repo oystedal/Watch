@@ -41,7 +41,7 @@ func (cr *CommandRunner) Run() {
 			if cr.killed {
 				return
 			}
-			// subprocess is running
+			// subprocess is not running
 			select {
 			case <-cr.runChan:
 				log.Debug("Received on runChan, starting subprocess")
@@ -50,7 +50,7 @@ func (cr *CommandRunner) Run() {
 				return
 			}
 		} else {
-			// subprocess is not running
+			// subprocess is running
 			select {
 			case <-cr.runChan:
 				continue
@@ -73,7 +73,6 @@ func (cr *CommandRunner) Run() {
 
 func (cr *CommandRunner) createSubprocess() {
 	var attr syscall.SysProcAttr
-	// TODO: Panic if this field is not present
 	reflect.ValueOf(&attr).Elem().FieldByName("Setpgid").SetBool(true)
 
 	cr.cmd = exec.Command(cr.args[0], cr.args[1:]...)
@@ -98,8 +97,7 @@ func (cr *CommandRunner) wait() {
 		log.Critical(err)
 		os.Exit(1)
 	} else if q > 0 {
-		// log.Println("Command has finished executing")
-		cr.cmd.Wait() // Clean up any goroutines created by cmd.Start.
+		cr.cmd.Wait()
 		cr.ticker.Stop()
 		cr.ticker = nil
 		cr.cmd = nil
